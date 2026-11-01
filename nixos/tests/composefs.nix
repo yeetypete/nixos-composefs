@@ -116,6 +116,7 @@ in
         t.assertIn("Current Entry: ${blessedUkiFile}", machine.succeed("bootctl status"))
 
       with subtest("A successful boot removes the UKI's boot counter"):
+        machine.wait_for_unit("systemd-boot-check-no-failures.service")
         machine.wait_for_unit("systemd-bless-boot.service")
         machine.succeed("test -e /boot/EFI/Linux/${blessedUkiFile}")
         machine.fail("test -e /boot/EFI/Linux/${system.boot.loader.ukiFile}")

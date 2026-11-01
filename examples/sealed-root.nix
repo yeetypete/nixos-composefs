@@ -7,6 +7,9 @@
   system.image.version = "1";
 
   boot.uki.tries = 3;
+  # A boot with failed units doesn't reach boot-complete.target.
+  systemd.additionalUpstreamSystemUnits = [ "systemd-boot-check-no-failures.service" ];
+  systemd.services.systemd-boot-check-no-failures.requiredBy = [ "boot-complete.target" ];
 
   # The system is immutable and must be updated by deploying a new image.
   nix.enable = false;
