@@ -1,9 +1,5 @@
 # Boot the machine from the Secure Boot test and open a root shell in it.
 { lib, hostPkgs, ... }:
-let
-  # The same keys as in the Secure Boot test.
-  keys = hostPkgs.callPackage ./secure-boot-keys.nix { };
-in
 {
   imports = [ ./composefs-secure-boot.nix ];
 
@@ -14,11 +10,9 @@ in
   testScript = lib.mkForce (
     { nodes, ... }:
     ''
-      ${import ./common/composefs-disk.nix {
-        inherit lib hostPkgs;
-        machine = nodes.machine;
-        espFiles = [ "${keys}/auto:/loader/keys/auto" ];
-      }}
+      ${import ./common/composefs-disk.nix { machine = nodes.machine; }}
+
+      import subprocess
 
       # systemd-boot enrolls the keys and reboots.
       machine.start(allow_reboot=True)

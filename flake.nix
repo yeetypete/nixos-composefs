@@ -28,7 +28,7 @@
         system: test:
         nixpkgs.legacyPackages.${system}.testers.runNixOSTest {
           imports = [ test ];
-          defaults.imports = [
+          node.specialArgs.sealedSystem.imports = [
             self.nixosModules.default
             ./examples/sealed-root.nix
           ];
@@ -41,8 +41,8 @@
           {
             imports = [ ./nixos/modules/composefs.nix ];
             boot.composefs = {
-              package = lib.mkDefault (pkgs.buildPackages.callPackage ./pkgs/composefs-ctl/package.nix { });
-              setupRoot.package = lib.mkDefault (pkgs.callPackage ./pkgs/composefs-setup-root/package.nix { });
+              package = lib.mkDefault (pkgs.callPackage ./pkgs/bootc/package.nix { });
+              buildPackage = lib.mkDefault (pkgs.buildPackages.callPackage ./pkgs/bootc/package.nix { });
             };
           };
         default = self.nixosModules.composefs;

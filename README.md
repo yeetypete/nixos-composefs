@@ -17,8 +17,7 @@ Advantages over
   be changed after partitioning, limited only by free disk space.
 - Deduplication: files with identical content across images share a single
   copy on disk and in the page cache.
-- Switch or roll back to any number of generations, not only the previous
-  one.
+- Updates and rollback with [bootc](https://github.com/bootc-dev/bootc).
 - NixOS systems are represented as standard OCI images. Existing tooling and
   infrastructure for container images, such as registries, signing and
   transports, can all be leveraged.
@@ -37,22 +36,22 @@ At build time, the module:
    signed for Secure Boot. The result is `system.build.composefsImage`, an OCI
    image layout.
 
-At boot, systemd-boot starts the UKI. In the initrd,
-[composefs-setup-root](pkgs/composefs-setup-root) mounts the image matching the
-UKI's digest as the root filesystem, overlaid with a tmpfs. The partition
-holding the composefs repository is mounted at `/sysroot`. This is where
-updates add new images, and where `/var` preserves application state across
-boots and updates.
+`bootc install` then deploys the image to a disk. At boot, systemd-boot starts
+the UKI. In the initrd, bootc's `bootc-root-setup.service` mounts the image
+matching the UKI's digest as the root filesystem, overlaid with a tmpfs. The
+partition holding the composefs repository is mounted read-only at `/sysroot`.
+This is where updates add new images, and where `/var` preserves application
+state across boots and updates.
 
 ```txt
 ESP
 └── EFI/
     ├── BOOT/BOOTX64.EFI           systemd-boot
-    └── Linux/nixos_<version>.efi  UKI, with composefs.digest= in kernel command line
+    └── Linux/bootc/bootc_composefs-<digest>.efi  UKI, with composefs.digest= in kernel command line
 root partition (e.g. ext4 with fs-verity enabled)  mounted at /sysroot
 ├── composefs/                     composefs repository containing the images and their files
 └── state/
-    ├── deploy/<digest>/           per-image /etc and /var state (unused by default)
+    ├── deploy/<digest>/           per-image state: /etc (unused by default), var -> ../../os/default/var
     └── os/default/var/            /var, shared by all images
 ```
 
@@ -87,6 +86,16 @@ nix build .#nixosConfigurations.robot.config.system.build.composefsImage
 See [`examples/sealed-root.nix`](examples/sealed-root.nix) for a minimal
 working configuration.
 
+Install it on a disk, and update from a registry:
+
+```sh
+bootc install to-disk --source-imgref oci:./result:latest \
+  --composefs-backend --bootloader systemd --filesystem ext4 --generic-image --wipe /dev/sdX
+
+skopeo copy oci:./result:latest docker://registry.example.com/os:latest
+bootc switch registry.example.com/os:latest
+```
+
 ## Secure Boot
 
 The UKI and systemd-boot can be signed for Secure Boot without the private key
@@ -101,6 +110,8 @@ made outside of Nix with
    boot.composefs.secureBoot = {
      enable = true;
      certificate = ./secureboot/db.pem;
+     # The PK, KEK and db .auth files for systemd-boot to enroll.
+     enrollKeys = ./secureboot/auto;
      signatures = {
        uki = ./secureboot/uki.sig;
        systemd-boot = ./secureboot/systemd-boot.sig;
@@ -108,20 +119,21 @@ made outside of Nix with
    };
    ```
 
-2. Build the data to sign:
+2. Build the data to sign and sign it, e.g. with an HSM, a cloud KMS or OpenSSL.
+   Sign systemd-boot first, as its signature is part of the image and so of the
+   data to sign for the UKI:
 
    ```sh
-   nix build .#nixosConfigurations.robot.config.system.build.composefsSignedData
+   build=.#nixosConfigurations.robot.config.system.build.composefsSignedData
+
+   nix build $build.systemd-boot
+   openssl dgst -sha256 -sign db.key -out secureboot/systemd-boot.sig result
+
+   nix build $build.uki
+   openssl dgst -sha256 -sign db.key -out secureboot/uki.sig result
    ```
 
-3. Sign it, e.g. with an HSM, a cloud KMS or OpenSSL:
-
-   ```sh
-   openssl dgst -sha256 -sign db.key -out secureboot/uki.sig result/uki
-   openssl dgst -sha256 -sign db.key -out secureboot/systemd-boot.sig result/systemd-boot
-   ```
-
-4. Build the image. The signatures are first verified and then attached to the binaries.
+3. Build the image. The signatures are first verified and then attached to the binaries.
 
 Notes:
 
@@ -130,6 +142,7 @@ Notes:
 - The db certificate must be enrolled in the firmware, e.g. by systemd-boot
   (see
   [loader.conf(5)](https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html)).
+  bootc stages `enrollKeys` for this.
 
 > [!WARNING]
 > Enrolling your keys replaces existing keys in the UEFI firmware. Without
@@ -181,12 +194,13 @@ such paths from a directory in `/var`. TODO: Test this.
 - [x] VM test booting a deployed disk.
 - [x] Offline Secure Boot signing of the UKI and systemd-boot.
 - [ ] Enroll Microsoft's certificates along with the db certificate.
-- [ ] Rust update client: deploy images, boot counting with [systemd-boot](https://systemd.io/AUTOMATIC_BOOT_ASSESSMENT/), rollback.
+- [x] Install, update and roll back with bootc.
+- [ ] Automatic rollback: bootc's composefs backend doesn't do [boot counting](https://systemd.io/AUTOMATIC_BOOT_ASSESSMENT/) yet.
 - [ ] Create flashable disk images with [`image.repart`](https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/image/repart.nix).
 - [ ] TPM-bound encryption of the root partition.
 - [ ] Immutable `/etc` with `system.etc.overlay` setting.
 - [ ] Fully read-only root without a transient overlay.
-- [ ] Upstream [composefs-setup-root patch](pkgs/composefs-setup-root/transient-root.patch).
+- [ ] Drop the bootc version override once nixpkgs has caught up.
 - [ ] Upstream to nixpkgs?
 
 ## Development

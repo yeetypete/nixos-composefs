@@ -1,10 +1,6 @@
 # Boot the sealed image with Secure Boot enforced, signed offline with keys
 # that systemd-boot enrolls on the first boot.
-{
-  lib,
-  hostPkgs,
-  ...
-}:
+{ hostPkgs, ... }:
 let
   keys = hostPkgs.callPackage ./secure-boot-keys.nix { };
 
@@ -13,11 +9,13 @@ let
     config: name:
     hostPkgs.runCommand "${name}.sig" { nativeBuildInputs = [ hostPkgs.openssl ]; } ''
       openssl dgst -sha256 -sign ${keys}/db.key -out $out \
-        ${config.system.build.composefsSignedData}/${name}
+        ${config.system.build.composefsSignedData.${name}}
     '';
 in
 {
   name = "composefs-secure-boot";
+
+  nodes.installer = ./common/composefs-installer.nix;
 
   nodes.machine =
     { config, ... }:
@@ -27,6 +25,7 @@ in
       boot.composefs.secureBoot = {
         enable = true;
         certificate = "${keys}/db.pem";
+        enrollKeys = "${keys}/auto";
         signatures = {
           uki = sign config "uki";
           systemd-boot = sign config "systemd-boot";
@@ -37,11 +36,7 @@ in
   testScript =
     { nodes, ... }:
     ''
-      ${import ./common/composefs-disk.nix {
-        inherit lib hostPkgs;
-        machine = nodes.machine;
-        espFiles = [ "${keys}/auto:/loader/keys/auto" ];
-      }}
+      ${import ./common/composefs-disk.nix { machine = nodes.machine; }}
 
       # systemd-boot enrolls the keys and reboots.
       machine.start(allow_reboot=True)
@@ -50,9 +45,6 @@ in
       with subtest("The system booted with Secure Boot enabled"):
         t.assertIn("Secure Boot: enabled (user)", machine.succeed("bootctl status"))
 
-      ${import ./common/composefs-subtests.nix {
-        inherit lib;
-        machine = nodes.machine;
-      }}
+      ${import ./common/composefs-subtests.nix { machine = nodes.machine; }}
     '';
 }

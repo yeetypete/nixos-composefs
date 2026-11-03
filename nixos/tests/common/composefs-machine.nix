@@ -1,8 +1,9 @@
 # A machine booting from a disk produced by composefs-disk.nix.
-{ config, lib, ... }:
+{ lib, sealedSystem, ... }:
 {
+  imports = [ sealedSystem ];
+
   boot.composefs.enable = true;
-  environment.systemPackages = [ config.boot.composefs.package ];
 
   virtualisation = {
     directBoot.enable = false;
